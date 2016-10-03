@@ -1,0 +1,9 @@
+{
+  "apps": [{
+    "name"      : "answeredthis",
+    "script"    : "./target/debug/answeredthis",
+    "env": {
+      "APP_PRODUCTION": "1"
+    }
+  }]
+}
