@@ -1,0 +1,7 @@
+CREATE TABLE posts (
+  id INTEGER PRIMARY KEY NOT NULL,
+  title VARCHAR NOT NULL,
+  asof TEXT NOT NULL,
+  content TEXT NOT NULL,
+  published BOOLEAN NOT NULL DEFAULT 'f'
+)
