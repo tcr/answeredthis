@@ -1,3 +1,7 @@
 *.sqlite
 target
 Cargo.lock
+bkp
+.env
+dist/deploy/answeredthis
+dist/deploy/static
