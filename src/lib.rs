@@ -5,6 +5,8 @@
 extern crate dotenv;
 extern crate iron;
 extern crate chrono;
+#[macro_use]
+extern crate serde_derive;
 
 pub mod schema;
 pub mod models;
@@ -14,7 +16,12 @@ use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
 use models::NewPost;
 
-pub fn create_post<'a>(conn: &SqliteConnection, title: &'a str, content: &'a str, answered: bool) -> usize {
+pub fn create_post<'a>(
+    conn: &SqliteConnection,
+    title: &'a str,
+    content: &'a str,
+    answered: bool,
+) -> usize {
     use schema::posts;
 
     let date = UTC::now().date().format("%B %Y").to_string();
@@ -31,7 +38,13 @@ pub fn create_post<'a>(conn: &SqliteConnection, title: &'a str, content: &'a str
         .expect("Error saving new post")
 }
 
-pub fn update_post<'a>(conn: &SqliteConnection, new_id: i32, new_title: &'a str, new_content: &'a str, new_answered: bool) {
+pub fn update_post<'a>(
+    conn: &SqliteConnection,
+    new_id: i32,
+    new_title: &'a str,
+    new_content: &'a str,
+    new_answered: bool,
+) {
     use schema::posts::dsl::*;
 
     let _ = diesel::update(posts.find(new_id))

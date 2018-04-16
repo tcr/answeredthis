@@ -14,6 +14,7 @@ extern crate dotenv;
 extern crate router;
 extern crate rustc_serialize;
 extern crate staticfile;
+#[macro_use]
 extern crate serde_json;
 extern crate cookie;
 extern crate uuid;
@@ -21,10 +22,15 @@ extern crate syntect;
 extern crate htmlescape;
 extern crate futures;
 extern crate hyper;
+#[macro_use]
+extern crate rayon;
 extern crate tokio_core;
 extern crate hyper_tls;
 #[macro_use]
 extern crate dotenv_codegen;
+#[macro_use]
+extern crate lazy_static;
+#[macro_use] extern crate cached;
 
 use answeredthis::{create_post, update_post};
 use answeredthis::models::*;
@@ -42,6 +48,7 @@ use std::collections::HashMap;
 use mount::Mount;
 use hyper::{Client, Method, Chunk};
 use futures::{Future, Stream};
+use rayon::prelude::*;
 use tokio_core::reactor::Core;
 use mustache::MapBuilder;
 // use hyper::header;
@@ -59,25 +66,31 @@ use syntect::easy::HighlightLines;
 use syntect::parsing::SyntaxSet;
 use syntect::highlighting::ThemeSet;
 use syntect::html::{styles_to_coloured_html, IncludeBackground};
+use cached::UnboundCache;
 
-fn format_style_html(style: &str, code: &str) -> String {
-    // Load these once at the start of your program
-    let ps = SyntaxSet::load_defaults_nonewlines();
-    let ts = ThemeSet::load_defaults();
+cached_key!{
+    FIB: UnboundCache<String, String> = UnboundCache::new();
+    Key = { format!("{}-{}", style, code) };
+    fn format_style_html(style: &str, code: &str) -> String = {
+        // Load these once at the start of your program
+        let ps = SyntaxSet::load_defaults_nonewlines();
+        let ts = ThemeSet::load_defaults();
 
-    let key = match style {
-        "rust" => "Rust",
-        "sh" => "Shell Script (Bash)",
-        "ruby" => "Ruby",
-        "c" => "C",
-        _ => return code.to_string(),
-    };
+        let key = match style {
+            "rust" => "Rust",
+            "sh" => "Shell Script (Bash)",
+            "ruby" => "Ruby",
+            "c" => "C",
+            _ => return code.to_string(),
+        };
 
-    let syntax = ps.find_syntax_by_name(key).expect("Unexpected style");
-    let mut h = HighlightLines::new(syntax, &ts.themes["InspiredGitHub"]);
-    let regions = h.highlight(code);
-    styles_to_coloured_html(&regions[..], IncludeBackground::No)
+        let syntax = ps.find_syntax_by_name(key).expect("Unexpected style");
+        let mut h = HighlightLines::new(syntax, &ts.themes["InspiredGitHub"]);
+        let regions = h.highlight(code);
+        styles_to_coloured_html(&regions[..], IncludeBackground::No)
+    }
 }
+
 
 pub fn establish_connection() -> SqliteConnection {
     let database_url = env::var("DATABASE_URL").unwrap();
@@ -86,16 +99,21 @@ pub fn establish_connection() -> SqliteConnection {
 }
 
 #[derive(RustcEncodable)]
-struct Answer {
-    id: String,
-    title: String,
-    asof: String,
-    content: String,
-    answered: bool,
+pub struct Answer {
+    pub id: String,
+    pub title: String,
+    pub asof: String,
+    pub content: String,
+    pub answered: bool,
 }
 
 impl Answer {
-    fn new(post: &Post) -> Self {
+    pub fn new(post: &Post) -> Self {
+        lazy_static! {
+            static ref RE_LINKS: Regex = Regex::new(r"(?P<l>^|[^\(<])(?P<u>https?://[^\s>\]]+)").unwrap();
+            static ref RE_CODE: Regex = Regex::new(r#"<code class="language-(?P<t>[^"]+)">(?P<u>[\s\S]*?)</code>"#).unwrap();
+        }
+
         let mut opts = pulldown_cmark::Options::empty();
         opts.insert(pulldown_cmark::OPTION_ENABLE_TABLES);
         opts.insert(pulldown_cmark::OPTION_ENABLE_FOOTNOTES);
@@ -105,15 +123,13 @@ impl Answer {
         let mut title = String::new();
         pulldown_cmark::html::push_html(&mut title, parser);
 
-        let re = Regex::new(r"(?P<l>^|[^\(<])(?P<u>https?://[^\s>\]]+)").unwrap();
-        let new_content = re.replace_all(&post.content, "$l<$u>");
+        let new_content = RE_LINKS.replace_all(&post.content, "$l<$u>");
 
         let parser = pulldown_cmark::Parser::new_ext(&new_content, opts);
         let mut content = String::new();
         pulldown_cmark::html::push_html(&mut content, parser);
 
-        let code = Regex::new(r#"<code class="language-(?P<t>[^"]+)">(?P<u>[\s\S]*?)</code>"#).unwrap();
-        let content = code.replace_all(&content, |cap: &Captures| {
+        let content = RE_CODE.replace_all(&content, |cap: &Captures| {
             format!("<code>{}</code>", format_style_html(cap.name("t").unwrap(), &htmlescape::decode_html(cap.name("u").unwrap()).unwrap()))
         });
 
@@ -124,6 +140,16 @@ impl Answer {
             content: content,
             answered: post.published,
         }
+    }
+
+    pub fn to_api(&self) -> serde_json::Value {
+        json!({
+            "asof": self.asof,
+            "id": self.id,
+            "title": self.title,
+            "content": self.content,
+            "answered": self.answered,
+        })
     }
 }
 
@@ -264,6 +290,33 @@ fn require_login(req: &mut Request) -> bool {
         }
     }
     false
+}
+
+fn api_answers(req: &mut Request) -> IronResult<Response> {
+    use answeredthis::schema::posts::dsl::*;
+
+    let mutex = req.get::<Write<DbConn>>().unwrap();
+    let conn = mutex.lock().unwrap();
+
+    let results = posts
+        //.limit(5)
+        .filter(published.eq(true))
+        .order(id.desc())
+        .load::<Post>(&*conn)
+        .expect("Error loading posts");
+
+    let json = json!({
+        "answers": results.into_iter().map(|x| {
+            Answer::new(&x).to_api()
+        }).collect::<Vec<_>>(),
+        "logged_in": require_login(req),
+    });
+
+    Ok(Response::with((
+        status::Ok,
+        serde_json::to_string(&json).unwrap(),
+        Header(ContentType::json()),
+    )))
 }
 
 fn github_redirect() -> Response {
@@ -429,6 +482,8 @@ fn main() {
     router.get("/edit", edit_handler_get, "edit_handler_get");
     router.post("/edit", edit_handler_post, "edit_handler_post");
     router.get("/oauth/callback", oauth_callback, "oauth_callback");
+
+    router.get("/api/answers/", api_answers, "answers");
 
     let mut chain = Chain::new(router);
     chain.link(Write::<GlobState>::both(session_state));
