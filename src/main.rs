@@ -102,8 +102,10 @@ pub fn establish_connection() -> SqliteConnection {
 pub struct Answer {
     pub id: String,
     pub title: String,
+    pub title_html: String,
     pub asof: String,
     pub content: String,
+    pub content_html: String,
     pub answered: bool,
 }
 
@@ -118,26 +120,27 @@ impl Answer {
         opts.insert(pulldown_cmark::OPTION_ENABLE_TABLES);
         opts.insert(pulldown_cmark::OPTION_ENABLE_FOOTNOTES);
 
-        let title = format!("## {}", post.title);
-        let parser = pulldown_cmark::Parser::new_ext(&title, opts);
-        let mut title = String::new();
-        pulldown_cmark::html::push_html(&mut title, parser);
+        let title_md = format!("## {}", post.title);
+        let parser = pulldown_cmark::Parser::new_ext(&title_md, opts);
+        let mut title_html = String::new();
+        pulldown_cmark::html::push_html(&mut title_html, parser);
 
-        let new_content = RE_LINKS.replace_all(&post.content, "$l<$u>");
+        let content_md = RE_LINKS.replace_all(&post.content, "$l<$u>");
+        let parser = pulldown_cmark::Parser::new_ext(&content_md, opts);
+        let mut content_html = String::new();
+        pulldown_cmark::html::push_html(&mut content_html, parser);
 
-        let parser = pulldown_cmark::Parser::new_ext(&new_content, opts);
-        let mut content = String::new();
-        pulldown_cmark::html::push_html(&mut content, parser);
-
-        let content = RE_CODE.replace_all(&content, |cap: &Captures| {
+        let content_html = RE_CODE.replace_all(&content_html, |cap: &Captures| {
             format!("<code>{}</code>", format_style_html(cap.name("t").unwrap(), &htmlescape::decode_html(cap.name("u").unwrap()).unwrap()))
         });
 
         Answer {
             id: post.id.to_string(),
-            title: title,
+            title: post.title.clone(),
+            title_html,
             asof: post.asof.clone(),
-            content: content,
+            content: post.content.clone(),
+            content_html,
             answered: post.published,
         }
     }
@@ -147,7 +150,9 @@ impl Answer {
             "asof": self.asof,
             "id": self.id,
             "title": self.title,
+            "title_html": self.title_html,
             "content": self.content,
+            "content_html": self.content_html,
             "answered": self.answered,
         })
     }
@@ -228,6 +233,14 @@ fn new_handler_post(req: &mut Request) -> IronResult<Response> {
     Ok(Response::with((status::Found, RedirectRaw("/".to_string()))))
     //Ok(Response::with((status::Ok, out.into_inner(), Header(ContentType::html()))))
 }
+
+fn login_get(req: &mut Request) -> IronResult<Response> {
+    if !require_login(req) {
+        return Ok(github_redirect());
+    }
+    Ok(Response::with((status::Found, RedirectRaw("/".to_string()))))
+}
+
 
 fn edit_handler_get(req: &mut Request) -> IronResult<Response> {
     if !require_login(req) {
@@ -477,12 +490,10 @@ fn main() {
 
     let mut router = Router::new();
     router.get("/", index_handler, "index");
-    router.get("/new", new_handler_get, "new_handler_get");
-    router.post("/new", new_handler_post, "new_handler_post");
-    router.get("/edit", edit_handler_get, "edit_handler_get");
-    router.post("/edit", edit_handler_post, "edit_handler_post");
+    router.get("/login", login_get, "login");
     router.get("/oauth/callback", oauth_callback, "oauth_callback");
-
+    router.post("/api/new", new_handler_post, "new_handler_post");
+    router.post("/api/edit", edit_handler_post, "edit_handler_post");
     router.get("/api/answers/", api_answers, "answers");
 
     let mut chain = Chain::new(router);

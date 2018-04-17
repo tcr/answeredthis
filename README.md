@@ -15,3 +15,8 @@ dokku config:set --no-restart answeredthis DOKKU_LETSENCRYPT_EMAIL=<email>
 
 DATABASE_URL /storage/edit-timryan.sqlite3
 ```
+
+```
+cd frontend
+npx webpack --watch ./src/index.tsx --mode development --output-filename='answeredthis.js' --output-path='../static'
+```
