@@ -1,5 +1,8 @@
-// #[macro_use] extern crate diesel_codegen;
-// #[macro_use]
+#![feature(plugin, decl_macro)]
+#![plugin(rocket_codegen)]
+
+#[macro_use] extern crate rocket;
+#[macro_use] extern crate rocket_codegen;
 extern crate diesel;
 #[macro_use] extern crate maplit;
 extern crate answeredthis;
@@ -31,6 +34,10 @@ extern crate dotenv_codegen;
 #[macro_use]
 extern crate lazy_static;
 #[macro_use] extern crate cached;
+
+
+use rocket::State;
+use rocket::response::content;
 
 use answeredthis::{create_post, update_post};
 use answeredthis::models::*;
@@ -89,13 +96,6 @@ cached_key!{
         let regions = h.highlight(code);
         styles_to_coloured_html(&regions[..], IncludeBackground::No)
     }
-}
-
-
-pub fn establish_connection() -> SqliteConnection {
-    let database_url = env::var("DATABASE_URL").unwrap();
-    SqliteConnection::establish(&database_url)
-        .expect(&format!("Error connecting to {}", database_url))
 }
 
 #[derive(RustcEncodable)]
@@ -159,49 +159,10 @@ impl Answer {
 }
 
 
-fn index_handler(req: &mut Request) -> IronResult<Response> {
-    use answeredthis::schema::posts::dsl::*;
 
-    let mutex = req.get::<Write<DbConn>>().unwrap();
-    let conn = mutex.lock().unwrap();
 
-    let results = posts
-        //.limit(5)
-        .order(id.desc())
-        .load::<Post>(&*conn)
-        .expect("Error loading posts");
 
-    let data = MapBuilder::new()
-        .insert("answers", &results.iter().map(|x| Answer::new(x)).collect::<Vec<_>>()).unwrap()
-        .insert_bool("logged_in", require_login(req))
-        .build();
 
-    // First the string needs to be compiled.
-    let template = mustache::compile_str(include_str!("../views/home.html"));
-
-    let mut out = Cursor::new(Vec::new());
-    template.render_data(&mut out, &data);
-
-    //let ref query = req.extensions.get::<Router>().unwrap().find("query").unwrap_or("/");
-    Ok(Response::with((status::Ok, out.into_inner(), Header(ContentType::html()))))
-}
-
-fn new_handler_get(req: &mut Request) -> IronResult<Response> {
-    if !require_login(req) {
-        return Ok(github_redirect());
-    }
-
-    // First the string needs to be compiled.
-    let template = mustache::compile_str(include_str!("../views/new_get.html"));
-
-    let mut out = Cursor::new(Vec::new());
-    template.render(&mut out, &hashmap!{
-        "title" => "".to_string(),
-        "content" => "".to_string(),
-    }).unwrap();
-
-    Ok(Response::with((status::Ok, out.into_inner(), Header(ContentType::html()))))
-}
 
 fn form_truthy(value: &str) -> bool {
     value != "" && value != "no" && value != "false" && value != "off"
@@ -234,77 +195,6 @@ fn new_handler_post(req: &mut Request) -> IronResult<Response> {
     //Ok(Response::with((status::Ok, out.into_inner(), Header(ContentType::html()))))
 }
 
-fn login_get(req: &mut Request) -> IronResult<Response> {
-    if !require_login(req) {
-        return Ok(github_redirect());
-    }
-    Ok(Response::with((status::Found, RedirectRaw("/".to_string()))))
-}
-
-
-fn edit_handler_get(req: &mut Request) -> IronResult<Response> {
-    if !require_login(req) {
-        return Ok(github_redirect());
-    }
-
-    // First the string needs to be compiled.
-    let template = mustache::compile_str(include_str!("../views/edit.html"));
-
-    use params::Params;
-
-    let mut map = req.get_ref::<Params>().unwrap().to_strict_map::<String>().unwrap();
-
-    let id = map.remove("id").unwrap();
-    let num_id = id.parse::<i32>().unwrap();
-
-    println!("what {:?}", num_id);
-
-    let mutex = req.get::<Write<DbConn>>().unwrap();
-    let conn = mutex.lock().unwrap();
-
-    let mut results = {
-        use answeredthis::schema::posts::dsl::*;
-
-        posts
-        .filter(id.eq(num_id))
-        .limit(1)
-        .load::<Post>(&*conn)
-        .expect("Error loading posts")
-    };
-
-    let post = results.pop().unwrap();
-
-    let mut out = Cursor::new(Vec::new());
-    let mut hey = hashmap!{
-        "title" => post.title.clone(),
-        "content" => post.content.clone(),
-        "post_id" => num_id.to_string(),
-    };
-    if post.published {
-        hey.insert("answered", "checked".to_string());
-    }
-    template.render(&mut out, &hey).unwrap();
-
-    Ok(Response::with((status::Ok, out.into_inner(), Header(ContentType::html()))))
-}
-
-fn require_login(req: &mut Request) -> bool {
-    let mutex = req.get::<Write<GlobState>>().unwrap();
-    let session_state = mutex.lock().unwrap();
-
-    if let Some(cookie) = req.headers.get::<headers::Cookie>() {
-        for item in cookie.0.clone() {
-            let item = cookie::Cookie::parse(item).unwrap();
-            if item.name() == "session" {
-                if let Ok(uuid) = Uuid::parse_str(item.value()) {
-                    return session_state.get(&uuid).is_some()
-                }
-            }
-        }
-    }
-    false
-}
-
 fn api_answers(req: &mut Request) -> IronResult<Response> {
     use answeredthis::schema::posts::dsl::*;
 
@@ -312,7 +202,6 @@ fn api_answers(req: &mut Request) -> IronResult<Response> {
     let conn = mutex.lock().unwrap();
 
     let results = posts
-        //.limit(5)
         .filter(published.eq(true))
         .order(id.desc())
         .load::<Post>(&*conn)
@@ -331,17 +220,6 @@ fn api_answers(req: &mut Request) -> IronResult<Response> {
         Header(ContentType::json()),
     )))
 }
-
-fn github_redirect() -> Response {
-    dotenv().ok();
-
-    Response::with((status::Found, RedirectRaw(
-        format!("https://github.com/login/oauth/authorize?client_id={}&redirect_uri={}",
-        env::var("OAUTH_KEY").unwrap(),
-        env::var("OAUTH_CALLBACK").unwrap(),
-    ))))
-}
-
 
 fn edit_handler_post(req: &mut Request) -> IronResult<Response> {
     if !require_login(req) {
@@ -371,6 +249,15 @@ fn edit_handler_post(req: &mut Request) -> IronResult<Response> {
     Ok(Response::with((status::Found, RedirectRaw("/".to_string()))))
     //Ok(Response::with((status::Ok, out.into_inner(), Header(ContentType::html()))))
 }
+
+
+
+
+
+
+
+
+
 
 pub fn fetch_post(url: &str) -> serde_json::Result<serde_json::Value> {
     let mut core = Core::new().unwrap();
@@ -410,6 +297,87 @@ pub fn fetch_get(url: &str) -> serde_json::Result<serde_json::Value> {
     })).unwrap()
 }
 
+pub fn establish_connection() -> SqliteConnection {
+    let database_url = env::var("DATABASE_URL").unwrap();
+    SqliteConnection::establish(&database_url)
+        .expect(&format!("Error connecting to {}", database_url))
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+fn index_handler(req: &mut Request) -> IronResult<Response> {
+    use answeredthis::schema::posts::dsl::*;
+
+    let mutex = req.get::<Write<DbConn>>().unwrap();
+    let conn = mutex.lock().unwrap();
+
+    let results = posts
+        //.limit(5)
+        .order(id.desc())
+        .load::<Post>(&*conn)
+        .expect("Error loading posts");
+
+    let data = MapBuilder::new()
+        .insert("answers", &results.iter().map(|x| Answer::new(x)).collect::<Vec<_>>()).unwrap()
+        .insert_bool("logged_in", require_login(req))
+        .build();
+
+    // First the string needs to be compiled.
+    let template = mustache::compile_str(include_str!("../views/home.html"));
+
+    let mut out = Cursor::new(Vec::new());
+    template.render_data(&mut out, &data);
+
+    //let ref query = req.extensions.get::<Router>().unwrap().find("query").unwrap_or("/");
+    Ok(Response::with((status::Ok, out.into_inner(), Header(ContentType::html()))))
+}
+
+fn login_get(req: &mut Request) -> IronResult<Response> {
+    if !require_login(req) {
+        return Ok(github_redirect());
+    }
+    Ok(Response::with((status::Found, RedirectRaw("/".to_string()))))
+}
+
+fn require_login(req: &mut Request) -> bool {
+    let mutex = req.get::<Write<GlobState>>().unwrap();
+    let session_state = mutex.lock().unwrap();
+
+    if let Some(cookie) = req.headers.get::<headers::Cookie>() {
+        for item in cookie.0.clone() {
+            let item = cookie::Cookie::parse(item).unwrap();
+            if item.name() == "session" {
+                if let Ok(uuid) = Uuid::parse_str(item.value()) {
+                    return session_state.get(&uuid).is_some()
+                }
+            }
+        }
+    }
+    false
+}
+
+fn github_redirect() -> Response {
+    dotenv().ok();
+
+    Response::with((status::Found, RedirectRaw(
+        format!("https://github.com/login/oauth/authorize?client_id={}&redirect_uri={}",
+        env::var("OAUTH_KEY").unwrap(),
+        env::var("OAUTH_CALLBACK").unwrap(),
+    ))))
+}
+
 fn oauth_callback(req: &mut Request) -> IronResult<Response> {
     use params::Params;
 
@@ -434,8 +402,6 @@ fn oauth_callback(req: &mut Request) -> IronResult<Response> {
     let username = user.unwrap().pointer("/login").unwrap().as_str().unwrap().to_string();
 
     if username == "tcr" {
-        println!("SET THAT COOKIE");
-
         let uuid = Uuid::new_v4();
         let mut jar = CookieJar::new();
         let cookie = cookie::Cookie::new("session".to_string(), uuid.to_string());
@@ -471,7 +437,7 @@ struct SessionState {
     github_id: String,
 }
 
-fn main() {
+fn main2() {
     dotenv().ok();
 
     let port = if env::var("APP_PRODUCTION").is_ok() {
@@ -500,8 +466,72 @@ fn main() {
     chain.link(Write::<GlobState>::both(session_state));
     chain.link(Write::<DbConn>::both(db_conn));
     mount.mount("/", chain);
+    mount.mount("/favicon.ico", Static::new(Path::new("static/favicon.ico")));
+    mount.mount("/favicon.png", Static::new(Path::new("static/favicon.png")));
 
     let _server = Iron::new(mount)
         .http(&format!("0.0.0.0:{}", port)[..]).unwrap();
     println!("http://localhost:{}/", port);
+}
+
+
+#[get("/")]
+fn index(state: State<BetterSessionState>) -> content::Html<String> {
+    let conn = state.db.lock().unwrap();
+
+    let results = {
+        use answeredthis::schema::posts::dsl::*;
+        
+        posts
+            //.limit(5)
+            .order(id.desc())
+            .load::<Post>(&*conn)
+            .expect("Error loading posts")
+    };
+
+    let data = MapBuilder::new()
+        .insert("answers", &results.iter().map(|x| Answer::new(x)).collect::<Vec<_>>()).unwrap()
+        
+        
+        //TODODODODDODO
+        // .insert_bool("logged_in", require_login(req))
+        //TODODODODDODO
+
+        
+        .build();
+
+    // First the string needs to be compiled.
+    let template = mustache::compile_str(include_str!("../views/home.html"));
+
+    let mut out = Cursor::new(Vec::new());
+    template.render_data(&mut out, &data);
+
+    //let ref query = req.extensions.get::<Router>().unwrap().find("query").unwrap_or("/");
+    content::Html(String::from_utf8_lossy(&out.into_inner()).to_string())
+}
+
+use std::sync::Arc;
+use std::sync::Mutex;
+
+// #[derive(PartialEq, Eq, Hash, Clone, Debug)]
+struct BetterSessionState {
+    db: Arc<Mutex<SqliteConnection>>,
+}
+
+fn main() {
+    dotenv().ok();
+
+    let port = if env::var("APP_PRODUCTION").is_ok() {
+        80
+    } else {
+        8000
+    };
+    println!("port {:?}", port);
+
+    let db_conn = establish_connection();
+
+    rocket::ignite()
+        .manage(BetterSessionState { db: Arc::new(Mutex::new(db_conn)), })
+        .mount("/", routes![index])
+        .launch();
 }
