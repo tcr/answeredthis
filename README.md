@@ -10,8 +10,8 @@ Then first push
 
 ```
 dokku domains:add answeredthis answeredthis.com
-dokku letsencrypt answeredthis
 dokku config:set --no-restart answeredthis DOKKU_LETSENCRYPT_EMAIL=<email>
+dokku letsencrypt answeredthis
 
 DATABASE_URL /storage/edit-timryan.sqlite3
 ```

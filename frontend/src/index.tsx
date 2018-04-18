@@ -213,7 +213,7 @@ class Answers extends React.Component {
     return (
       <div id="content-render">
         <div id="header">
-          <h1>answered this</h1>
+          <h1>(tim) answered this</h1>
           {self.state.loggedIn ?
             <div className="caption">
               <a href="#" onClick={(e) => this.setState({newItem: true})}>Submit new answer?</a>

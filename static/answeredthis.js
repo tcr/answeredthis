@@ -37766,7 +37766,7 @@ class Answers extends React.Component {
         }
         return (React.createElement("div", { id: "content-render" },
             React.createElement("div", { id: "header" },
-                React.createElement("h1", null, "answered this"),
+                React.createElement("h1", null, "(tim) answered this"),
                 self.state.loggedIn ?
                     React.createElement("div", { className: "caption" },
                         React.createElement("a", { href: "#", onClick: (e) => this.setState({ newItem: true }) }, "Submit new answer?"))

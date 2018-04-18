@@ -1,5 +1,7 @@
-#![feature(plugin, decl_macro)]
+#![feature(plugin, decl_macro, custom_derive)]
 #![plugin(rocket_codegen)]
+
+#![allow(warnings)]
 
 #[macro_use] extern crate rocket;
 #[macro_use] extern crate rocket_codegen;
@@ -48,6 +50,10 @@ use iron::headers::ContentType;
 use iron::modifiers::{Header};
 use cookie::CookieJar;
 use iron::modifiers::RedirectRaw;
+use rocket::http::{Cookie, Cookies};
+use rocket::response::{NamedFile, Redirect};
+use rocket::request::Form;
+use std::path::PathBuf;
 use iron::prelude::*;
 use std::str::FromStr;
 use iron::status;
@@ -164,96 +170,6 @@ impl Answer {
 
 
 
-fn form_truthy(value: &str) -> bool {
-    value != "" && value != "no" && value != "false" && value != "off"
-}
-
-fn new_handler_post(req: &mut Request) -> IronResult<Response> {
-    if !require_login(req) {
-        return Ok(github_redirect());
-    }
-
-    let mutex = req.get::<Write<DbConn>>().unwrap();
-    let conn = mutex.lock().unwrap();
-
-    use params::Params;
-
-    let mut map = req.get_ref::<Params>().unwrap().to_strict_map::<String>().unwrap();
-    let title = map.remove("title").unwrap_or("".to_string());
-    let content = map.remove("content").unwrap_or("".to_string());
-    let answered = map.remove("answered").unwrap_or("".to_string());
-
-    println!("title {:?}", title);
-    println!("content {:?}", content);
-    println!("answered {:?}", answered);
-    create_post(&conn, &title, &content, form_truthy(&answered));
-
-    //let mut out = Cursor::new(Vec::new());
-    //template.render(&mut out, &0).unwrap();
-
-    Ok(Response::with((status::Found, RedirectRaw("/".to_string()))))
-    //Ok(Response::with((status::Ok, out.into_inner(), Header(ContentType::html()))))
-}
-
-fn api_answers(req: &mut Request) -> IronResult<Response> {
-    use answeredthis::schema::posts::dsl::*;
-
-    let mutex = req.get::<Write<DbConn>>().unwrap();
-    let conn = mutex.lock().unwrap();
-
-    let results = posts
-        .filter(published.eq(true))
-        .order(id.desc())
-        .load::<Post>(&*conn)
-        .expect("Error loading posts");
-
-    let json = json!({
-        "answers": results.into_iter().map(|x| {
-            Answer::new(&x).to_api()
-        }).collect::<Vec<_>>(),
-        "logged_in": require_login(req),
-    });
-
-    Ok(Response::with((
-        status::Ok,
-        serde_json::to_string(&json).unwrap(),
-        Header(ContentType::json()),
-    )))
-}
-
-fn edit_handler_post(req: &mut Request) -> IronResult<Response> {
-    if !require_login(req) {
-        return Ok(github_redirect());
-    }
-
-    let mutex = req.get::<Write<DbConn>>().unwrap();
-    let conn = mutex.lock().unwrap();
-
-    use params::Params;
-
-    let mut map = req.get_ref::<Params>().unwrap().to_strict_map::<String>().unwrap();
-    let title = map.remove("title").unwrap_or("".to_string());
-    let content = map.remove("content").unwrap_or("".to_string());
-    let id = map.remove("id").unwrap();
-    let answered = map.remove("answered").unwrap_or("".to_string());
-
-    println!("id {:?}", id);
-    println!("title {:?}", title);
-    println!("content {:?}", content);
-    println!("answered {:?}", answered);
-    update_post(&conn, id.parse::<i32>().unwrap(), &title, &content, form_truthy(&answered));
-
-    //let mut out = Cursor::new(Vec::new());
-    //template.render(&mut out, &0).unwrap();
-
-    Ok(Response::with((status::Found, RedirectRaw("/".to_string()))))
-    //Ok(Response::with((status::Ok, out.into_inner(), Header(ContentType::html()))))
-}
-
-
-
-
-
 
 
 
@@ -315,83 +231,80 @@ pub fn establish_connection() -> SqliteConnection {
 
 
 
-
-
-fn index_handler(req: &mut Request) -> IronResult<Response> {
-    use answeredthis::schema::posts::dsl::*;
-
-    let mutex = req.get::<Write<DbConn>>().unwrap();
-    let conn = mutex.lock().unwrap();
-
-    let results = posts
-        //.limit(5)
-        .order(id.desc())
-        .load::<Post>(&*conn)
-        .expect("Error loading posts");
-
-    let data = MapBuilder::new()
-        .insert("answers", &results.iter().map(|x| Answer::new(x)).collect::<Vec<_>>()).unwrap()
-        .insert_bool("logged_in", require_login(req))
-        .build();
-
-    // First the string needs to be compiled.
-    let template = mustache::compile_str(include_str!("../views/home.html"));
-
-    let mut out = Cursor::new(Vec::new());
-    template.render_data(&mut out, &data);
-
-    //let ref query = req.extensions.get::<Router>().unwrap().find("query").unwrap_or("/");
-    Ok(Response::with((status::Ok, out.into_inner(), Header(ContentType::html()))))
+#[derive(FromForm, Debug)]
+struct ApiEditForm {
+    id: String,
+    title: String,
+    content: String,
+    answered: bool,
 }
 
-fn login_get(req: &mut Request) -> IronResult<Response> {
-    if !require_login(req) {
-        return Ok(github_redirect());
+#[post("/api/edit", data = "<form>")]
+fn api_edit(mut cookies: Cookies, form: Form<ApiEditForm>, state: State<BetterSessionState>) -> Redirect {
+    if !require_login(&mut cookies) {
+        return github_redirect();
     }
-    Ok(Response::with((status::Found, RedirectRaw("/".to_string()))))
+
+    let conn = state.db.lock().unwrap();
+
+    println!("form {:?}", form);
+    let form = form.get();
+    update_post(&conn, form.id.parse::<i32>().unwrap(), &form.title, &form.content, form.answered);
+
+    Redirect::to("/")
 }
 
-fn require_login(req: &mut Request) -> bool {
-    let mutex = req.get::<Write<GlobState>>().unwrap();
-    let session_state = mutex.lock().unwrap();
+#[derive(FromForm, Debug)]
+struct ApiNewForm {
+    title: String,
+    content: String,
+    answered: bool,
+}
 
-    if let Some(cookie) = req.headers.get::<headers::Cookie>() {
-        for item in cookie.0.clone() {
-            let item = cookie::Cookie::parse(item).unwrap();
-            if item.name() == "session" {
-                if let Ok(uuid) = Uuid::parse_str(item.value()) {
-                    return session_state.get(&uuid).is_some()
-                }
-            }
-        }
+#[post("/api/new", data = "<form>")]
+fn api_new(mut cookies: Cookies, form: Form<ApiNewForm>, state: State<BetterSessionState>) -> Redirect {
+    if !require_login(&mut cookies) {
+        return github_redirect();
     }
-    false
+
+    let conn = state.db.lock().unwrap();
+
+    println!("form {:?}", form);
+    let form = form.get();
+    create_post(&conn, &form.title, &form.content, form.answered);
+
+    Redirect::to("/")
 }
 
-fn github_redirect() -> Response {
-    dotenv().ok();
-
-    Response::with((status::Found, RedirectRaw(
-        format!("https://github.com/login/oauth/authorize?client_id={}&redirect_uri={}",
-        env::var("OAUTH_KEY").unwrap(),
-        env::var("OAUTH_CALLBACK").unwrap(),
-    ))))
+fn github_redirect() -> Redirect {
+    Redirect::to(
+        &format!("https://github.com/login/oauth/authorize?client_id={}&redirect_uri={}",
+            env::var("OAUTH_KEY").unwrap(),
+            env::var("OAUTH_CALLBACK").unwrap(),
+        )
+    )
 }
 
-fn oauth_callback(req: &mut Request) -> IronResult<Response> {
-    use params::Params;
+#[get("/login")]
+fn login(mut cookies: Cookies) -> Redirect {
+    if !require_login(&mut cookies) {
+        return github_redirect();
+    }
+    Redirect::to("/")
+}
 
-    let mutex = req.get::<Write<GlobState>>().unwrap();
-    let mut session_state = mutex.lock().unwrap();
+#[derive(FromForm, Debug)]
+struct OauthCallbackQuery {
+    code: Option<String>,
+}
 
-    let mut map = req.get_ref::<Params>().unwrap().to_strict_map::<String>().unwrap();
-    let code = map.remove("code").unwrap_or("".to_string());
-
+#[get("/oauth/callback?<query>")]
+fn oauth_callback(mut cookies: Cookies, query: OauthCallbackQuery) -> Redirect {
     let json = fetch_post(
         &format!("https://github.com/login/oauth/access_token?client_id={}&client_secret={}&code={}",
             env::var("OAUTH_KEY").unwrap(),
             env::var("OAUTH_SECRET").unwrap(),
-            code,
+            query.code.expect("Code not provided"),
         ),
     );
     let user = fetch_get(
@@ -402,81 +315,42 @@ fn oauth_callback(req: &mut Request) -> IronResult<Response> {
     let username = user.unwrap().pointer("/login").unwrap().as_str().unwrap().to_string();
 
     if username == "tcr" {
-        let uuid = Uuid::new_v4();
-        let mut jar = CookieJar::new();
-        let cookie = cookie::Cookie::new("session".to_string(), uuid.to_string());
-        jar.add(cookie);
-
-        let delta = jar.delta().map(|item| {
-            let mut c = item.clone();
-            c.set_path("/".to_string());
-            c.to_string()
-        }).collect::<Vec<_>>();
-        let set = headers::SetCookie(delta);
-
-        session_state.insert(uuid, SessionState {
-            github_id: username.to_string()
-        });
-
-        Ok(Response::with((status::Found, RedirectRaw("/".to_string()), iron::modifiers::Header(set))))
-    } else {
-        Ok(Response::with((status::Found, RedirectRaw("/".to_string()))))
+        cookies.add_private(Cookie::new("session", username));
     }
+    
+    Redirect::to("/")
 }
 
-#[derive(Copy, Clone)]
-pub struct DbConn;
-impl typemap::Key for DbConn { type Value = SqliteConnection; }
-
-#[derive(Copy, Clone)]
-struct GlobState;
-impl typemap::Key for GlobState { type Value = HashMap<Uuid, SessionState>; }
-
-#[derive(PartialEq, Eq, Hash, Clone, Debug)]
-struct SessionState {
-    github_id: String,
+fn require_login(cookies: &mut Cookies) -> bool {
+    cookies.get_private("session").is_some()
 }
 
-fn main2() {
-    dotenv().ok();
+#[get("/api/answers")]
+fn api_answers(state: State<BetterSessionState>, mut cookies: Cookies) -> content::Json<String> {
+    let conn = state.db.lock().unwrap();
 
-    let port = if env::var("APP_PRODUCTION").is_ok() {
-        80
-    } else {
-        8000
+    let results = {
+        use answeredthis::schema::posts::dsl::*;
+
+        posts
+            .filter(published.eq(true))
+            .order(id.desc())
+            .load::<Post>(&*conn)
+            .expect("Error loading posts")
     };
-    println!("port {:?}", port);
 
-    let db_conn = establish_connection();
+    let json = json!({
+        "answers": results.into_iter().map(|x| {
+            Answer::new(&x).to_api()
+        }).collect::<Vec<_>>(),
+        "logged_in": require_login(&mut cookies),
+    });
 
-    let session_state = HashMap::new();
-
-    let mut mount = Mount::new();
-    mount.mount("/static", Static::new(Path::new("static/")));
-
-    let mut router = Router::new();
-    router.get("/", index_handler, "index");
-    router.get("/login", login_get, "login");
-    router.get("/oauth/callback", oauth_callback, "oauth_callback");
-    router.post("/api/new", new_handler_post, "new_handler_post");
-    router.post("/api/edit", edit_handler_post, "edit_handler_post");
-    router.get("/api/answers/", api_answers, "answers");
-
-    let mut chain = Chain::new(router);
-    chain.link(Write::<GlobState>::both(session_state));
-    chain.link(Write::<DbConn>::both(db_conn));
-    mount.mount("/", chain);
-    mount.mount("/favicon.ico", Static::new(Path::new("static/favicon.ico")));
-    mount.mount("/favicon.png", Static::new(Path::new("static/favicon.png")));
-
-    let _server = Iron::new(mount)
-        .http(&format!("0.0.0.0:{}", port)[..]).unwrap();
-    println!("http://localhost:{}/", port);
+    content::Json(serde_json::to_string(&json).unwrap())
 }
-
 
 #[get("/")]
-fn index(state: State<BetterSessionState>) -> content::Html<String> {
+fn index(state: State<BetterSessionState>, mut cookies: Cookies) -> content::Html<String> {
     let conn = state.db.lock().unwrap();
 
     let results = {
@@ -491,13 +365,7 @@ fn index(state: State<BetterSessionState>) -> content::Html<String> {
 
     let data = MapBuilder::new()
         .insert("answers", &results.iter().map(|x| Answer::new(x)).collect::<Vec<_>>()).unwrap()
-        
-        
-        //TODODODODDODO
-        // .insert_bool("logged_in", require_login(req))
-        //TODODODODDODO
-
-        
+        .insert_bool("logged_in", require_login(&mut cookies))
         .build();
 
     // First the string needs to be compiled.
@@ -508,6 +376,21 @@ fn index(state: State<BetterSessionState>) -> content::Html<String> {
 
     //let ref query = req.extensions.get::<Router>().unwrap().find("query").unwrap_or("/");
     content::Html(String::from_utf8_lossy(&out.into_inner()).to_string())
+}
+
+#[get("/static/<file..>")]
+fn files(file: PathBuf) -> Option<NamedFile> {
+    NamedFile::open(Path::new("static/").join(file)).ok()
+}
+
+#[get("/favicon.ico")]
+fn favicon_ico() -> Option<NamedFile> {
+    NamedFile::open(Path::new("static/favicon.ico")).ok()
+}
+
+#[get("/favicon.png")]
+fn favicon_png() -> Option<NamedFile> {
+    NamedFile::open(Path::new("static/favicon.png")).ok()
 }
 
 use std::sync::Arc;
@@ -532,6 +415,17 @@ fn main() {
 
     rocket::ignite()
         .manage(BetterSessionState { db: Arc::new(Mutex::new(db_conn)), })
-        .mount("/", routes![index])
+        .mount("/", routes![
+            index,
+            login,
+            oauth_callback,
+            api_answers,
+            api_new,
+            api_edit,
+
+            files,
+            favicon_ico,
+            favicon_png,
+        ])
         .launch();
 }
