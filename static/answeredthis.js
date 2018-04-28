@@ -37718,7 +37718,7 @@ class AnswerView extends React.Component {
             answer
             ${item.answered ? 'answered' : ''}
             ${this.state.collapsed ? 'collapsed' : ''}
-          ` },
+          `, "data-content": (item.title + '\n\n' + item.content).toLowerCase() },
                 React.createElement("div", { className: "title", dangerouslySetInnerHTML: { __html: item.title_html }, style: {
                         cursor: 'pointer',
                     }, onClick: (e) => {
@@ -37747,13 +37747,18 @@ class AnswerView extends React.Component {
     }
 }
 class Answers extends React.Component {
-    constructor() {
-        super(...arguments);
+    constructor(props) {
+        super(props);
         this.state = {
             loggedIn: this.props.loggedIn,
             answers: this.props.answers,
             newItem: false,
         };
+        var style = document.createElement('style');
+        style.type = 'text/css';
+        style.innerHTML = '';
+        document.getElementsByTagName('head')[0].appendChild(style);
+        this.style = style;
     }
     render() {
         const self = this;
@@ -37769,11 +37774,23 @@ class Answers extends React.Component {
         }
         return (React.createElement("div", { id: "content-render" },
             React.createElement("div", { id: "header" },
-                React.createElement("h1", null, "(tim) answered this"),
+                React.createElement("h1", null, "tim answered this"),
                 self.state.loggedIn ?
                     React.createElement("div", { className: "caption" },
                         React.createElement("a", { href: "#", onClick: (e) => this.setState({ newItem: true }) }, "Submit new answer?"))
                     : null),
+            React.createElement("div", { id: "search" },
+                'Search: ',
+                React.createElement("input", { type: "text", onChange: (e) => {
+                        let filters = e.target.value.toLowerCase().replace(/^\s*|\s*$/g, '').split(/\s+/)
+                            .filter(x => x.length > 0);
+                        let selectors = filters.map(x => {
+                            return `[data-content*=${JSON.stringify(x)}]`;
+                        }).join('');
+                        console.log(selectors);
+                        this.style.innerText = filters.length == 0 ? ''
+                            : `.answer { display: none; } .answer${selectors} { display: block; }`;
+                    } })),
             answers,
             React.createElement("div", { id: "footer" }, "\u00A9 2018 AnsweredThis.com")));
     }

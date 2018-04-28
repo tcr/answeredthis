@@ -132,6 +132,7 @@ class AnswerView extends React.Component {
             ${item.answered ? 'answered' : ''}
             ${this.state.collapsed ? 'collapsed' : ''}
           `}
+          data-content={(item.title + '\n\n' + item.content).toLowerCase()}
         >
           <div
             className="title"
@@ -176,11 +177,23 @@ class Answers extends React.Component {
     loggedIn: boolean,
   };
 
+  style: any;
+
   state = {
     loggedIn: this.props.loggedIn,
     answers: this.props.answers,
     newItem: false,
   };
+
+  constructor(props) {
+    super(props);
+
+    var style = document.createElement('style');
+    style.type = 'text/css';
+    style.innerHTML = '';
+    document.getElementsByTagName('head')[0].appendChild(style);
+    this.style = style;
+  }
 
   render(): React.ReactNode {
     const self = this;
@@ -214,13 +227,29 @@ class Answers extends React.Component {
     return (
       <div id="content-render">
         <div id="header">
-          <h1>(tim) answered this</h1>
+          <h1>tim answered this</h1>
           {self.state.loggedIn ?
             <div className="caption">
               <a href="#" onClick={(e) => this.setState({newItem: true})}>Submit new answer?</a>
             </div>
             : null
           }
+        </div>
+        <div id="search">
+          {'Search: '}
+          <input
+            type="text"
+            onChange={(e) => {
+              let filters = e.target.value.toLowerCase().replace(/^\s*|\s*$/g, '').split(/\s+/)
+                .filter(x => x.length > 0);
+              let selectors = filters.map(x => {
+                return `[data-content*=${JSON.stringify(x)}]`
+              }).join('');
+              console.log(selectors);
+              this.style.innerText = filters.length == 0 ? ''
+                : `.answer { display: none; } .answer${selectors} { display: block; }`
+            }}
+          />
         </div>
         {answers}
         <div id="footer">
