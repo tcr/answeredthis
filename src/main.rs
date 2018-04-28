@@ -32,13 +32,12 @@ extern crate rayon;
 extern crate tokio_core;
 extern crate hyper_tls;
 #[macro_use]
-extern crate dotenv_codegen;
-#[macro_use]
 extern crate lazy_static;
 #[macro_use] extern crate cached;
 
 
 use rocket::State;
+use rocket::config::{Config, Environment};
 use rocket::response::content;
 
 use answeredthis::{create_post, update_post};
@@ -120,18 +119,26 @@ impl Answer {
         lazy_static! {
             static ref RE_LINKS: Regex = Regex::new(r"(?P<l>^|[^\(<])(?P<u>https?://[^\s>\]]+)").unwrap();
             static ref RE_CODE: Regex = Regex::new(r#"<code class="language-(?P<t>[^"]+)">(?P<u>[\s\S]*?)</code>"#).unwrap();
+            static ref RE_UNANSWERED: Regex = Regex::new(r#"^\s*UNANSWERED\s+"#).unwrap();
         }
 
         let mut opts = pulldown_cmark::Options::empty();
         opts.insert(pulldown_cmark::OPTION_ENABLE_TABLES);
         opts.insert(pulldown_cmark::OPTION_ENABLE_FOOTNOTES);
 
+        // Format title.
         let title_md = format!("## {}", post.title);
         let parser = pulldown_cmark::Parser::new_ext(&title_md, opts);
         let mut title_html = String::new();
         pulldown_cmark::html::push_html(&mut title_html, parser);
 
-        let content_md = RE_LINKS.replace_all(&post.content, "$l<$u>");
+        let answered = !RE_UNANSWERED.is_match(&post.content);
+
+        // Format content.
+        let content_md = RE_LINKS.replace_all(
+            &RE_UNANSWERED.replace_all(&post.content, ""),
+            "$l<$u>",
+        );
         let parser = pulldown_cmark::Parser::new_ext(&content_md, opts);
         let mut content_html = String::new();
         pulldown_cmark::html::push_html(&mut content_html, parser);
@@ -147,7 +154,7 @@ impl Answer {
             asof: post.asof.clone(),
             content: post.content.clone(),
             content_html,
-            answered: post.published,
+            answered,
         }
     }
 
@@ -236,7 +243,6 @@ struct ApiEditForm {
     id: String,
     title: String,
     content: String,
-    answered: bool,
 }
 
 #[post("/api/edit", data = "<form>")]
@@ -249,7 +255,7 @@ fn api_edit(mut cookies: Cookies, form: Form<ApiEditForm>, state: State<BetterSe
 
     println!("form {:?}", form);
     let form = form.get();
-    update_post(&conn, form.id.parse::<i32>().unwrap(), &form.title, &form.content, form.answered);
+    update_post(&conn, form.id.parse::<i32>().unwrap(), &form.title, &form.content);
 
     Redirect::to("/")
 }
@@ -258,7 +264,6 @@ fn api_edit(mut cookies: Cookies, form: Form<ApiEditForm>, state: State<BetterSe
 struct ApiNewForm {
     title: String,
     content: String,
-    answered: bool,
 }
 
 #[post("/api/new", data = "<form>")]
@@ -271,7 +276,7 @@ fn api_new(mut cookies: Cookies, form: Form<ApiNewForm>, state: State<BetterSess
 
     println!("form {:?}", form);
     let form = form.get();
-    create_post(&conn, &form.title, &form.content, form.answered);
+    create_post(&conn, &form.title, &form.content);
 
     Redirect::to("/")
 }
@@ -333,7 +338,6 @@ fn api_answers(state: State<BetterSessionState>, mut cookies: Cookies) -> conten
         use answeredthis::schema::posts::dsl::*;
 
         posts
-            .filter(published.eq(true))
             .order(id.desc())
             .load::<Post>(&*conn)
             .expect("Error loading posts")
@@ -404,16 +408,16 @@ struct BetterSessionState {
 fn main() {
     dotenv().ok();
 
-    let port = if env::var("APP_PRODUCTION").is_ok() {
-        80
-    } else {
-        8000
-    };
-    println!("port {:?}", port);
+    println!("# ANSWERED THIS #");
 
     let db_conn = establish_connection();
 
-    rocket::ignite()
+    let config = Config::build(Environment::Staging)
+        .address("0.0.0.0")
+        .port(8000)
+        .finalize().unwrap();
+
+    rocket::custom(config, true)
         .manage(BetterSessionState { db: Arc::new(Mutex::new(db_conn)), })
         .mount("/", routes![
             index,

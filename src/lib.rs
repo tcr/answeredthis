@@ -20,7 +20,6 @@ pub fn create_post<'a>(
     conn: &SqliteConnection,
     title: &'a str,
     content: &'a str,
-    answered: bool,
 ) -> usize {
     use schema::posts;
 
@@ -30,7 +29,6 @@ pub fn create_post<'a>(
         title: title,
         asof: &date,
         content: content,
-        published: answered,
     };
 
     diesel::insert(&new_post).into(posts::table)
@@ -43,12 +41,16 @@ pub fn update_post<'a>(
     new_id: i32,
     new_title: &'a str,
     new_content: &'a str,
-    new_answered: bool,
 ) {
     use schema::posts::dsl::*;
 
     let _ = diesel::update(posts.find(new_id))
-       .set((title.eq(new_title), (content.eq(new_content)), (published.eq(new_answered))))
+       .set((
+            title.eq(new_title), 
+            (
+                content.eq(new_content)),
+            )
+        )
        .execute(conn)
        .expect(&format!("Unable to find post {}", new_id));
 }

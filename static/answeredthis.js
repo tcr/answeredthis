@@ -37679,12 +37679,10 @@ class AnswerEdit extends React.Component {
                             axios_1.default.post('/api/new', qs.stringify({
                                 title: this.state.title,
                                 content: this.state.content,
-                                answered: true,
                             })) :
                             axios_1.default.post('/api/edit', qs.stringify({
                                 title: this.state.title,
                                 content: this.state.content,
-                                answered: true,
                                 id: this.props.id,
                             })))
                             .then((e) => {
@@ -37703,6 +37701,7 @@ class AnswerView extends React.Component {
         super(...arguments);
         this.state = {
             editing: false,
+            collapsed: !this.props.item.answered,
         };
     }
     render() {
@@ -37715,10 +37714,19 @@ class AnswerView extends React.Component {
                 } }));
         }
         else {
-            return (React.createElement("div", { className: `answer ${item.answered ? 'answered' : 'collapsed'}` },
+            return (React.createElement("div", { className: `
+            answer
+            ${item.answered ? 'answered' : ''}
+            ${this.state.collapsed ? 'collapsed' : ''}
+          ` },
                 React.createElement("div", { className: "title", dangerouslySetInnerHTML: { __html: item.title_html }, style: {
                         cursor: 'pointer',
-                    }, onClick: this.props.onClick }),
+                    }, onClick: (e) => {
+                        this.setState({
+                            collapsed: !this.state.collapsed,
+                        });
+                        e.preventDefault();
+                    } }),
                 React.createElement("div", { className: "as-of" },
                     React.createElement("span", null,
                         "As of ",
@@ -37750,12 +37758,7 @@ class Answers extends React.Component {
     render() {
         const self = this;
         const answers = this.state.answers.map((item, i) => {
-            return (React.createElement(AnswerView, { key: i, loggedIn: self.state.loggedIn, item: item, onClick: (e) => {
-                    let updatedAnswers = JSON.parse(JSON.stringify(self.state.answers));
-                    updatedAnswers[i].answered = !updatedAnswers[i].answered;
-                    self.setState({ answers: updatedAnswers });
-                    e.preventDefault();
-                } }));
+            return (React.createElement(AnswerView, { key: i, loggedIn: self.state.loggedIn, item: item }));
         });
         if (this.state.newItem) {
             answers.unshift(React.createElement(AnswerEdit, { key: "@editing", title: "New Question", content: "", focus: "title", onClick: (e) => {

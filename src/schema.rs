@@ -6,6 +6,5 @@ table! {
         title -> Text,
         asof -> Text,
         content -> Text,
-        published -> Bool,
     }
 }

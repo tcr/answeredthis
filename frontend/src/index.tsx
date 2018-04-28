@@ -68,12 +68,10 @@ class AnswerEdit extends React.Component {
                 axios.post('/api/new', qs.stringify({
                   title: this.state.title,
                   content: this.state.content,
-                  answered: true,
                 })) :
                 axios.post('/api/edit', qs.stringify({
                   title: this.state.title,
                   content: this.state.content,
-                  answered: true,
                   id: this.props.id,
                 }))
               )
@@ -102,12 +100,12 @@ class AnswerEdit extends React.Component {
 class AnswerView extends React.Component {
   props: {
     item: Answer,
-    onClick: any,
     loggedIn: boolean,
   };
 
   state = {
     editing: false,
+    collapsed: !this.props.item.answered,
   };
 
   render(): React.ReactNode {
@@ -129,7 +127,11 @@ class AnswerView extends React.Component {
     } else {
       return (
         <div
-          className={`answer ${item.answered ? 'answered' : 'collapsed'}`}
+          className={`
+            answer
+            ${item.answered ? 'answered' : ''}
+            ${this.state.collapsed ? 'collapsed' : ''}
+          `}
         >
           <div
             className="title"
@@ -137,7 +139,12 @@ class AnswerView extends React.Component {
             style={{
               cursor: 'pointer',
             }}
-            onClick={this.props.onClick}
+            onClick={(e) => {
+              this.setState({
+                collapsed: !this.state.collapsed,
+              })
+              e.preventDefault();
+            }}
           />
           <div className="as-of">
             <span>As of {item.asof}.</span>
@@ -184,12 +191,6 @@ class Answers extends React.Component {
           key={i}
           loggedIn={self.state.loggedIn}
           item={item}
-          onClick={(e) => {
-            let updatedAnswers = JSON.parse(JSON.stringify(self.state.answers));
-            updatedAnswers[i].answered = !updatedAnswers[i].answered;
-            self.setState({answers: updatedAnswers});
-            e.preventDefault();
-          }}
         />
       );
     });

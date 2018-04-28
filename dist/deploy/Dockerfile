@@ -6,6 +6,6 @@ RUN apt-get update && apt-get install -y pkg-config libssl-dev sqlite3 libsqlite
 
 ADD . /app
 WORKDIR /app
-EXPOSE 80
+EXPOSE 8000
 
-CMD RUST_BACKTRACE=1 APP_PRODUCTION=1 ./answeredthis
+CMD RUST_BACKTRACE=1 LD_LIBRARY_PATH=. ./answeredthis

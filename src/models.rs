@@ -6,7 +6,6 @@ pub struct Post {
     pub title: String,
     pub asof: String,
     pub content: String,
-    pub published: bool,
 }
 
 #[derive(Insertable)]
@@ -15,5 +14,4 @@ pub struct NewPost<'a> {
     pub title: &'a str,
     pub asof: &'a str,
     pub content: &'a str,
-    pub published: bool,
 }

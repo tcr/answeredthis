@@ -5,3 +5,4 @@ bkp
 .env
 dist/deploy/answeredthis
 dist/deploy/static
+dist/deploy/*.so
