@@ -155,7 +155,7 @@ h1 {
   #search input {
     display: block;
     box-sizing: border-box;
-    padding: 8px 15px 8px 38px;
+    padding: 7px 14px 7px 37px;
     font-size: 16px;
     width: 15em;
     border: 1px solid #ccc;
@@ -167,8 +167,8 @@ h1 {
     content: "\1F50D";
     z-index: 100;
     position: absolute;
-    top: 8px;
-    left: 12px;
+    top: 7px;
+    left: 11px;
     font-size: 18px;
     filter: grayscale(100%); }
 

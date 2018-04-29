@@ -276,6 +276,10 @@ function start() {
         loggedIn={res.data.logged_in}
       />,
       document.querySelector('#content')!,
+      () => {
+        // Try to re-load page anchor if it exists.
+        window.location.hash = window.location.hash;
+      },
     );
   })
   .catch((err) => {

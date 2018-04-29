@@ -17,6 +17,7 @@ extern crate pulldown_cmark;
 extern crate regex;
 extern crate dotenv;
 extern crate router;
+extern crate ammonia;
 extern crate rustc_serialize;
 extern crate staticfile;
 #[macro_use]
@@ -131,6 +132,7 @@ impl Answer {
         let parser = pulldown_cmark::Parser::new_ext(&title_md, opts);
         let mut title_html = String::new();
         pulldown_cmark::html::push_html(&mut title_html, parser);
+        let title_html = ammonia::clean(&title_html);
 
         let answered = !RE_UNANSWERED.is_match(&post.content);
 
@@ -142,6 +144,7 @@ impl Answer {
         let parser = pulldown_cmark::Parser::new_ext(&content_md, opts);
         let mut content_html = String::new();
         pulldown_cmark::html::push_html(&mut content_html, parser);
+        let content_html = ammonia::clean(&content_html);
 
         let content_html = RE_CODE.replace_all(&content_html, |cap: &Captures| {
             format!("<code>{}</code>", format_style_html(cap.name("t").unwrap(), &htmlescape::decode_html(cap.name("u").unwrap()).unwrap()))
