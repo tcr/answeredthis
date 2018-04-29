@@ -63,6 +63,14 @@ body {
     box-sizing: border-box;
   }
 
+  &:not(:hover) .answer-anchor {
+    display: none;
+  }
+
+  .title h2 .answer-anchor {
+    color: #aaa !important;
+  }
+
   .title h2,
   input.title {
     margin-left: -20px;

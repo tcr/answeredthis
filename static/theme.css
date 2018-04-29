@@ -47,6 +47,10 @@ body {
     display: block;
     width: 100%;
     box-sizing: border-box; }
+  .answer:not(:hover) .answer-anchor {
+    display: none; }
+  .answer .title h2 .answer-anchor {
+    color: #aaa !important; }
   .answer .title h2,
   .answer input.title {
     margin-left: -20px;

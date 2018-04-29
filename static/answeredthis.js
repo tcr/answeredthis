@@ -37714,18 +37714,23 @@ class AnswerView extends React.Component {
                 } }));
         }
         else {
-            return (React.createElement("div", { className: `
+            return (React.createElement("div", { id: `a${item.id}`, className: `
             answer
             ${item.answered ? 'answered' : ''}
             ${this.state.collapsed ? 'collapsed' : ''}
           `, "data-content": (item.title + '\n\n' + item.content).toLowerCase() },
-                React.createElement("div", { className: "title", dangerouslySetInnerHTML: { __html: item.title_html }, style: {
+                React.createElement("div", { className: "title", dangerouslySetInnerHTML: {
+                        __html: item.title_html.replace(/<\/h2>/, ` <a class="answer-anchor" href="#a${item.id}">#</a>`),
+                    }, style: {
                         cursor: 'pointer',
                     }, onClick: (e) => {
-                        this.setState({
-                            collapsed: !this.state.collapsed,
-                        });
-                        e.preventDefault();
+                        // Don't target the answer-anchor
+                        if (e.target.tagName.toLowerCase() != 'a') {
+                            this.setState({
+                                collapsed: !this.state.collapsed,
+                            });
+                            e.preventDefault();
+                        }
                     } }),
                 React.createElement("div", { className: "as-of" },
                     React.createElement("span", null,

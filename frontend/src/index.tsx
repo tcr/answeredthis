@@ -127,6 +127,7 @@ class AnswerView extends React.Component {
     } else {
       return (
         <div
+          id={`a${item.id}`}
           className={`
             answer
             ${item.answered ? 'answered' : ''}
@@ -136,15 +137,20 @@ class AnswerView extends React.Component {
         >
           <div
             className="title"
-            dangerouslySetInnerHTML={{__html: item.title_html}}
+            dangerouslySetInnerHTML={{
+              __html: item.title_html.replace(/<\/h2>/, ` <a class="answer-anchor" href="#a${item.id}">#</a>`),
+            }}
             style={{
               cursor: 'pointer',
             }}
             onClick={(e) => {
-              this.setState({
-                collapsed: !this.state.collapsed,
-              })
-              e.preventDefault();
+              // Don't target the answer-anchor
+              if ((e.target as any).tagName.toLowerCase() != 'a') {
+                this.setState({
+                  collapsed: !this.state.collapsed,
+                })
+                e.preventDefault();
+              }
             }}
           />
           <div className="as-of">
