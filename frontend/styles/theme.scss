@@ -178,6 +178,7 @@ pre > code {
   display: block;
   font-size: 0.9em;
   padding: 6px 0;
+  border: none;
 }
 
 h1 {
@@ -194,21 +195,59 @@ h1 {
 #header {
   margin-top: 20px;
   position: relative;
-  margin-bottom: 20px;
+  margin-bottom: 10px;
+
+  .caption {
+    position: absolute;
+    top: 12px;
+    right: 0;
+
+    a {
+      text-decoration: none;
+    }
+  }
 }
 
-#header .caption {
-  position: absolute;
-  top: 12px;
-  right: 0;
-}
+#search {
+  position: relative;
 
-#header .caption a {
-  text-decoration: none;
+  span {
+    display: none;
+  }
+
+  input {
+    display: block;
+    box-sizing: border-box;
+    padding: 8px 15px 8px 38px;
+    font-size: 16px;
+    width: 15em;
+    border: 1px solid #ccc;
+    border-radius: 1px;
+    transition: width 250ms;
+
+    &:active, &:focus {
+      width: 100%;
+    }
+  }
+
+  &::before {
+    content: "\01F50D";
+    z-index: 100;
+    position: absolute;
+    top: 8px;
+    left: 12px;
+    font-size: 18px;
+    filter: grayscale(100%);
+  }
 }
 
 blockquote {
   margin-left: 10px;
   padding-left: 20px;
   border-left: 1px dashed #ccc;
+
+  blockquote {
+    background: #fea;
+    border-left-color: #a83;
+  }
 }

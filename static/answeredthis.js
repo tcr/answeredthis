@@ -37785,7 +37785,7 @@ class Answers extends React.Component {
                         React.createElement("a", { href: "#", onClick: (e) => this.setState({ newItem: true }) }, "Submit new answer?"))
                     : null),
             React.createElement("div", { id: "search" },
-                'Search: ',
+                React.createElement("span", null, 'Search: '),
                 React.createElement("input", { type: "text", onChange: (e) => {
                         let filters = e.target.value.toLowerCase().replace(/^\s*|\s*$/g, '').split(/\s+/)
                             .filter(x => x.length > 0);

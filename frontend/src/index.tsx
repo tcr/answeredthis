@@ -242,7 +242,7 @@ class Answers extends React.Component {
           }
         </div>
         <div id="search">
-          {'Search: '}
+          <span>{'Search: '}</span>
           <input
             type="text"
             onChange={(e) => {
