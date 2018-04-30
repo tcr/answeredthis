@@ -37804,7 +37804,10 @@ function start() {
     // Create the editor frame.
     axios_1.default.get('/api/answers/')
         .then((res) => {
-        ReactDOM.render(React.createElement(Answers, { answers: res.data.answers, loggedIn: res.data.logged_in }), document.querySelector('#content'));
+        ReactDOM.render(React.createElement(Answers, { answers: res.data.answers, loggedIn: res.data.logged_in }), document.querySelector('#content'), () => {
+            // Force scrolling to anchored element.
+            window.location.hash = window.location.hash;
+        });
     })
         .catch((err) => {
         console.log(err);

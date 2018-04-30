@@ -3,86 +3,75 @@
 
 #![allow(warnings)]
 
-#[macro_use] extern crate rocket;
-#[macro_use] extern crate rocket_codegen;
-extern crate diesel;
+#[macro_use] extern crate cached;
+#[macro_use] extern crate lazy_static;
 #[macro_use] extern crate maplit;
+#[macro_use] extern crate rayon;
+#[macro_use] extern crate rocket_codegen;
+#[macro_use] extern crate rocket;
+#[macro_use] extern crate serde_json;
+extern crate ammonia;
 extern crate answeredthis;
+extern crate cookie;
+extern crate diesel;
+extern crate dotenv;
+extern crate futures;
+extern crate htmlescape;
+extern crate hyper_tls;
+extern crate hyper;
 extern crate iron;
 extern crate mount;
+extern crate reqwest;
 extern crate mustache;
+extern crate opengraph;
 extern crate params;
 extern crate persistent;
 extern crate pulldown_cmark;
 extern crate regex;
-extern crate dotenv;
 extern crate router;
-extern crate ammonia;
 extern crate rustc_serialize;
-extern crate staticfile;
-#[macro_use]
-extern crate serde_json;
-extern crate cookie;
-extern crate uuid;
+extern crate scraper;
 extern crate syntect;
-extern crate htmlescape;
-extern crate futures;
-extern crate hyper;
-#[macro_use]
-extern crate rayon;
 extern crate tokio_core;
-extern crate hyper_tls;
-#[macro_use]
-extern crate lazy_static;
-#[macro_use] extern crate cached;
+extern crate url;
+extern crate uuid;
 
-
-use rocket::State;
-use rocket::config::{Config, Environment};
-use rocket::response::content;
 
 use answeredthis::{create_post, update_post};
 use answeredthis::models::*;
+use cached::UnboundCache;
+use cookie::CookieJar;
 use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
 use dotenv::dotenv;
-use iron::headers::ContentType;
-use iron::modifiers::{Header};
-use cookie::CookieJar;
-use iron::modifiers::RedirectRaw;
-use rocket::http::{Cookie, Cookies};
-use rocket::response::{NamedFile, Redirect};
-use rocket::request::Form;
-use std::path::PathBuf;
-use iron::prelude::*;
-use std::str::FromStr;
-use iron::status;
-use std::collections::HashMap;
-use mount::Mount;
-use hyper::{Client, Method, Chunk};
 use futures::{Future, Stream};
-use rayon::prelude::*;
-use tokio_core::reactor::Core;
+use hyper::{Client, Method, Chunk};
 use mustache::MapBuilder;
-// use hyper::header;
-use iron::headers;
-use persistent::Write;
+use rayon::prelude::*;
 use regex::{Captures, Regex};
-use router::Router;
-use staticfile::Static;
+use rocket::config::{Config, Environment};
+use rocket::http::{Cookie, Cookies};
+use rocket::request::Form;
+use rocket::response::{NamedFile, Redirect};
+use rocket::response::content;
+use rocket::State;
+use std::collections::HashMap;
 use std::env;
 use std::io::Cursor;
 use std::path::Path;
-use iron::typemap;
-use uuid::Uuid;
+use std::path::PathBuf;
+use std::str::FromStr;
 use syntect::easy::HighlightLines;
-use syntect::parsing::SyntaxSet;
 use syntect::highlighting::ThemeSet;
 use syntect::html::{styles_to_coloured_html, IncludeBackground};
-use cached::UnboundCache;
+use syntect::parsing::SyntaxSet;
+use tokio_core::reactor::Core;
+use uuid::Uuid;
+use url::Url;
+use scraper::{Selector, Html};
 
-cached_key!{
-    FIB: UnboundCache<String, String> = UnboundCache::new();
+cached_key! {
+    HIGHLIGHT_CACHE: UnboundCache<String, String> = UnboundCache::new();
     Key = { format!("{}-{}", style, code) };
     fn format_style_html(style: &str, code: &str) -> String = {
         // Load these once at the start of your program
@@ -115,13 +104,121 @@ pub struct Answer {
     pub answered: bool,
 }
 
+#[derive(Clone, Debug)]
+pub struct Preview {
+    site_name: Option<String>,
+    title: String,
+    url: Url,
+    description: Option<String>,
+    image: Option<String>,
+}
+
+impl Preview {
+    fn to_html(&self) -> String {
+        format!(
+            r#"<div class="preview"><a class="preview-link" href="{url}"><b class="preview-title">{title}</b> <span class="preview-url">{url}</span> <span class="preview-description">{description}</span></a></div>"#,
+            title=htmlescape::encode_minimal(&self.title),
+            url=htmlescape::encode_minimal(self.url.as_str()),
+            description=self.description.as_ref().map(|x| {
+                htmlescape::encode_minimal(x)
+            }).unwrap_or("".to_string()),
+        ).trim().to_string().replace("\n", " ")
+    }
+}
+
+cached_key! {
+    PREVIEW_CACHE: UnboundCache<String, Preview> = UnboundCache::new();
+    Key = { format!("{}", url.to_string()) };
+    fn preview(url: &Url) -> Preview = {
+        let og_summary = match opengraph::scrape(url.as_str(), Default::default()) {
+            Ok(object) => {
+                // Check that any data was meaningful
+                if object.title.len() > 0 {
+                    Some(Preview {
+                        site_name: object.site_name.clone(),
+                        title: object.title.clone(),
+                        url: url.clone(),
+                        description: object.description.clone(),
+                        image: object.images.get(0).map(|x| x.url.clone()),
+                    })
+                } else {
+                    None
+                }
+            },
+            Err(_) => {
+                eprintln!("Could not look up opengraph info for {:?}", url);
+                None
+            }
+        };
+
+        if let Some(og_summary) = og_summary {
+            og_summary
+        } else {
+            reqwest::get(url.as_str())
+                .and_then(|mut x| x.text())
+                .and_then(|x| {
+                    let document = Html::parse_document(&x);
+
+                    let title =
+                        document.select(&Selector::parse("title").unwrap())
+                        .next()
+                        .map(|title| {
+                            title.text().collect::<Vec<_>>().join("")
+                        })
+                        .unwrap_or_else(|| url.to_string());
+
+                    let description =
+                        document.select(&Selector::parse("body").unwrap())
+                        .next()
+                        .map(|body| {
+                            const DESC_LIMIT: usize = 200;
+                            let mut description = String::new();
+                            for text in body.text() {
+                                description.push_str(text.trim());
+                                if description.len() > DESC_LIMIT + 10 {
+                                    description = format!("{}...", &description[0..DESC_LIMIT]);
+                                    break;
+                                }
+                            }
+                            description
+                        });
+
+                    Ok(Preview {
+                        title,
+                        url: url.clone(),
+                        description,
+                        site_name: None,
+                        image: None
+                    })
+                })
+                .unwrap_or_else(|_| {
+                    // No real preview.
+                    Preview {
+                        title: url.to_string(),
+                        url: url.clone(),
+                        description: None,
+                        site_name: None,
+                        image: None,
+                    }
+                })
+        }
+    }
+}
+
 impl Answer {
     pub fn new(post: &Post) -> Self {
         lazy_static! {
-            static ref RE_LINKS: Regex = Regex::new(r"(?P<l>^|[^\(<])(?P<u>https?://[^\s>\]]+)").unwrap();
             static ref RE_CODE: Regex = Regex::new(r#"<code class="language-(?P<t>[^"]+)">(?P<u>[\s\S]*?)</code>"#).unwrap();
-            static ref RE_UNANSWERED: Regex = Regex::new(r#"^\s*UNANSWERED\s+"#).unwrap();
+            static ref RE_UNANSWERED: Regex = Regex::new(r#"(?m)^\s*!?UNANSWERED\b(\s*)$"#).unwrap();
+            static ref RE_PREVIEW: Regex = Regex::new(r#"(?m)^\s*!PREVIEW\b(.*)$"#).unwrap();
         }
+
+        let mut sanitizer = ammonia::Builder::default();
+        sanitizer.allowed_classes(hashmap![
+            "div" => hashset!["preview", "preview-title", "preview-url", "preview-description"],
+            "a" => hashset!["preview-link"],
+            "span" => hashset!["preview", "preview-title", "preview-url", "preview-description"],
+        ]);
 
         let mut opts = pulldown_cmark::Options::empty();
         opts.insert(pulldown_cmark::OPTION_ENABLE_TABLES);
@@ -132,20 +229,35 @@ impl Answer {
         let parser = pulldown_cmark::Parser::new_ext(&title_md, opts);
         let mut title_html = String::new();
         pulldown_cmark::html::push_html(&mut title_html, parser);
-        let title_html = ammonia::clean(&title_html);
+        let title_html = sanitizer.clean(&title_html).to_string();
 
+        // Detects "UNANSWERED" directve
         let answered = !RE_UNANSWERED.is_match(&post.content);
 
         // Format content.
-        let content_md = RE_LINKS.replace_all(
-            &RE_UNANSWERED.replace_all(&post.content, ""),
-            "$l<$u>",
-        );
+        let content_md = post.content.clone();
+        let content_md = RE_UNANSWERED.replace_all(&content_md, "");
+        let content_md = RE_PREVIEW.replace_all(&content_md, |cap: &Captures| {
+            let raw_string = cap.at(0).unwrap().to_string();
+            let url = match Url::from_str(&cap.at(1).unwrap()) {
+                Ok(url) => url,
+                Err(err) => {
+                    eprintln!("Error parsing !PREVIEW: {:?}", err);
+                    eprintln!("Parsed: {:?}", cap.at(1));
+                    return raw_string;
+                }
+            };
+
+            preview(&url).to_html()
+        });
+
+        // Parse content.
         let parser = pulldown_cmark::Parser::new_ext(&content_md, opts);
         let mut content_html = String::new();
         pulldown_cmark::html::push_html(&mut content_html, parser);
-        let content_html = ammonia::clean(&content_html);
+        let content_html = sanitizer.clean(&content_html).to_string();
 
+        // Convert code blocks with language codes
         let content_html = RE_CODE.replace_all(&content_html, |cap: &Captures| {
             format!("<code>{}</code>", format_style_html(cap.name("t").unwrap(), &htmlescape::decode_html(cap.name("u").unwrap()).unwrap()))
         });

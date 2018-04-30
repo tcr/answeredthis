@@ -50,7 +50,10 @@ body {
   .answer:not(:hover) .answer-anchor {
     display: none; }
   .answer .title h2 .answer-anchor {
-    color: #aaa !important; }
+    color: #aaa !important;
+    text-decoration: none; }
+    .answer .title h2 .answer-anchor:hover {
+      text-decoration: underline; }
   .answer .title h2,
   .answer input.title {
     margin-left: -20px;
@@ -179,5 +182,35 @@ blockquote {
   blockquote blockquote {
     background: #fea;
     border-left-color: #a83; }
+
+div.preview .preview-link {
+  display: block;
+  border: 1px solid #ddd;
+  padding: 0.5em 1em;
+  margin: 1em 4px;
+  text-decoration: none;
+  transition: all 0.15s linear; }
+  div.preview .preview-link:hover {
+    border-color: #55c;
+    box-shadow: 2px 2px 2px #ccc; }
+    div.preview .preview-link:hover .preview-title {
+      text-decoration: underline; }
+
+div.preview .preview-title {
+  display: block;
+  font-weight: bold;
+  font-size: 20px;
+  margin: 0.5em 0; }
+
+div.preview .preview-url {
+  display: block;
+  font-size: 10px;
+  color: grey;
+  margin: 0.5em 0; }
+
+div.preview .preview-description {
+  display: block;
+  color: black;
+  text-decoration: none; }
 
 /*# sourceMappingURL=theme.css.map*/

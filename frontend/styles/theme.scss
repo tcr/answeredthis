@@ -256,3 +256,41 @@ blockquote {
     border-left-color: #a83;
   }
 }
+
+div.preview .preview-link {
+  display: block;
+  border: 1px solid #ddd;
+  padding: 0.5em 1em;
+  margin: 1em 4px;
+  text-decoration: none;
+  transition: all 0.15s linear;
+
+  &:hover {
+    border-color: #55c;
+    box-shadow: 2px 2px 2px #ccc;
+
+    .preview-title {
+      text-decoration: underline;
+    }
+  }
+}
+
+div.preview .preview-title {
+  display: block;
+  font-weight: bold;
+  font-size: 20px;
+  margin: 0.5em 0;
+}
+
+div.preview .preview-url {
+  display: block;
+  font-size: 10px;
+  color: grey;
+  margin: 0.5em 0;
+}
+
+div.preview .preview-description {
+  display: block;
+  color: black;
+  text-decoration: none;
+}

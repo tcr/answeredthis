@@ -277,9 +277,9 @@ function start() {
       />,
       document.querySelector('#content')!,
       () => {
-        // Try to re-load page anchor if it exists.
+        // Force scrolling to anchored element.
         window.location.hash = window.location.hash;
-      },
+      }
     );
   })
   .catch((err) => {
