@@ -115,6 +115,19 @@ body {
     background: #fd4; }
   .answer:not(:hover) a.edit {
     display: none; }
+  .answer .sources {
+    text-transform: uppercase;
+    font-size: 15px;
+    margin-top: 30px;
+    color: #666; }
+  .answer .sources + ul {
+    font-size: 0.8em;
+    color: #444;
+    margin: 0 0 0 26px;
+    padding: 0; }
+  .answer .sources + ul li {
+    margin: 10px 0;
+    padding: 0; }
 
 code, pre {
   background: #f8f8f8;

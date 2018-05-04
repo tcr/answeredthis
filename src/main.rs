@@ -49,6 +49,7 @@ use hyper::{Client, Method, Chunk};
 use mustache::MapBuilder;
 use rayon::prelude::*;
 use regex::{Captures, Regex};
+use reqwest::header::UserAgent;
 use rocket::config::{Config, Environment};
 use rocket::http::{Cookie, Cookies};
 use rocket::request::Form;
@@ -130,7 +131,25 @@ cached_key! {
     PREVIEW_CACHE: UnboundCache<String, Preview> = UnboundCache::new();
     Key = { format!("{}", url.to_string()) };
     fn preview(url: &Url) -> Preview = {
-        let og_summary = match opengraph::scrape(url.as_str(), Default::default()) {
+        let bail = Preview {
+            title: url.to_string(),
+            url: url.clone(),
+            description: None,
+            site_name: None,
+            image: None,
+        };
+
+        let client = reqwest::Client::new();
+        let mut html = match client.get(url.as_str())
+            .header(UserAgent::new("facebookexternalhit/1.1"))
+            .send() {
+            Ok(mut x) => x.text().unwrap(),
+            Err(_) => return bail,
+        };
+
+        let mut html2 = html.clone();
+        let mut cur = ::std::io::Cursor::new(&mut html2);
+        let og_summary = match opengraph::extract(&mut cur, Default::default()) {
             Ok(object) => {
                 // Check that any data was meaningful
                 if object.title.len() > 0 {
@@ -154,53 +173,39 @@ cached_key! {
         if let Some(og_summary) = og_summary {
             og_summary
         } else {
-            reqwest::get(url.as_str())
-                .and_then(|mut x| x.text())
-                .and_then(|x| {
-                    let document = Html::parse_document(&x);
+            let document = Html::parse_document(&html);
 
-                    let title =
-                        document.select(&Selector::parse("title").unwrap())
-                        .next()
-                        .map(|title| {
-                            title.text().collect::<Vec<_>>().join("")
-                        })
-                        .unwrap_or_else(|| url.to_string());
-
-                    let description =
-                        document.select(&Selector::parse("body").unwrap())
-                        .next()
-                        .map(|body| {
-                            const DESC_LIMIT: usize = 200;
-                            let mut description = String::new();
-                            for text in body.text() {
-                                description.push_str(text.trim());
-                                if description.len() > DESC_LIMIT + 10 {
-                                    description = format!("{}...", &description[0..DESC_LIMIT]);
-                                    break;
-                                }
-                            }
-                            description
-                        });
-
-                    Ok(Preview {
-                        title,
-                        url: url.clone(),
-                        description,
-                        site_name: None,
-                        image: None
-                    })
+            let title =
+                document.select(&Selector::parse("title").unwrap())
+                .next()
+                .map(|title| {
+                    title.text().collect::<Vec<_>>().join("")
                 })
-                .unwrap_or_else(|_| {
-                    // No real preview.
-                    Preview {
-                        title: url.to_string(),
-                        url: url.clone(),
-                        description: None,
-                        site_name: None,
-                        image: None,
+                .unwrap_or_else(|| url.to_string());
+
+            let description =
+                document.select(&Selector::parse("body").unwrap())
+                .next()
+                .map(|body| {
+                    const DESC_LIMIT: usize = 200;
+                    let mut description = String::new();
+                    for text in body.text() {
+                        description.push_str(text.trim());
+                        if description.len() > DESC_LIMIT + 10 {
+                            description = format!("{}...", &description[0..DESC_LIMIT]);
+                            break;
+                        }
                     }
-                })
+                    description
+                });
+
+            Preview {
+                title,
+                url: url.clone(),
+                description,
+                site_name: None,
+                image: None
+            }
         }
     }
 }
@@ -211,11 +216,12 @@ impl Answer {
             static ref RE_CODE: Regex = Regex::new(r#"<code class="language-(?P<t>[^"]+)">(?P<u>[\s\S]*?)</code>"#).unwrap();
             static ref RE_UNANSWERED: Regex = Regex::new(r#"(?m)^\s*!?UNANSWERED\b(\s*)$"#).unwrap();
             static ref RE_PREVIEW: Regex = Regex::new(r#"(?m)^\s*!PREVIEW\b(.*)$"#).unwrap();
+            static ref RE_SOURCES: Regex = Regex::new(r#"(?m)^\s*!SOURCES\s*$"#).unwrap();
         }
 
         let mut sanitizer = ammonia::Builder::default();
         sanitizer.allowed_classes(hashmap![
-            "div" => hashset!["preview", "preview-title", "preview-url", "preview-description"],
+            "div" => hashset!["preview", "preview-title", "preview-url", "preview-description", "sources"],
             "a" => hashset!["preview-link"],
             "span" => hashset!["preview", "preview-title", "preview-url", "preview-description"],
         ]);
@@ -250,6 +256,7 @@ impl Answer {
 
             preview(&url).to_html()
         });
+        let content_md = RE_SOURCES.replace_all(&content_md, "\n\n<div class=\"sources\">Sources:</div>\n\n");
 
         // Parse content.
         let parser = pulldown_cmark::Parser::new_ext(&content_md, opts);
